@@ -1,0 +1,169 @@
+---
+title: "NYPD Shooting Incident - Temporal Analysis"
+author: "Lyndon Carlson"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## Installing Necessary Libraries
+##### The analysis requires the following R packages:
+- dplyr for data transformation
+- lubridate for date handling
+- stringr for PDF rendering
+- ggplot2 for visualization
+
+```{r setup, include= TRUE}
+knitr::opts_chunk$set(warning=FALSE) # Suppress all warnings for tidyness
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(lubridate)
+  library(stringr)
+  library(ggplot2)
+})
+```
+
+
+## Importing Data
+This data is taken from Data.gov <https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD>. This data is a breakdown of every shooting incident that occurred in NYC going back to 2006 through the end of the previous calendar year. This data was manually extracted every quarter and reviewed by the Office of Management Analysis and Planning before being posted on the NYPD website. Each record represents a shooting incident in NYC and includes information about the event, the location and time of occurrence. This data can be used by the public to explore the nature of shooting/criminal activity.
+
+**Please note:** _This description was taken from the source author._
+
+```{r data}
+nypddata <- read.csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+```
+
+
+## Tidying and Transforming Data
+
+#### Removing Duplicates
+Check for and remove any duplicate rows to ensure the uniqueness of incidents.
+
+```{r transform_duplicates}
+nypddata <- nypddata %>%
+  distinct()
+```
+
+#### Dropping Unnecessary Columns
+
+Removing all columns except **INCIDENT_KEY, OCCUR_DATE, OCCUR_TIME** as they are not required for the analysis. These columns were empty or contained unnecessary information for this analysis.
+
+```{r transform_drop}
+nypddata <- nypddata %>%
+  select(INCIDENT_KEY, OCCUR_DATE, OCCUR_TIME)
+```
+
+#### Convert source data format to propper formatting
+1. **OCCUR_DATE:** Convert this column to a date format to facilitate analysis over time.
+2. **OCCUR_TIME:** Ensure this is in a time format if not already, to allow for time-based analysis.
+
+```{r transform_type}
+nypddata <- nypddata %>%
+  mutate(OCCUR_DATE = mdy(OCCUR_DATE)) %>%
+  mutate(OCCUR_TIME = format(strptime(OCCUR_TIME, format="%H:%M"), "%H:%M"))
+```
+
+#### Bucketing Temporal Data
+Bucketing temporal data for analysis based on hour of shooting and day of the week. 
+```{r bucket_time}
+nypddata <- nypddata %>%
+  mutate(OCCUR_DATE = as.Date(OCCUR_DATE, format = "%Y-%m-%d"), 
+# Ensure OCCUR_DATE is in Date format
+         Month = format(OCCUR_DATE, "%m"),
+         DayOfWeek = wday(OCCUR_DATE, label = TRUE))
+
+# Convert 'Month' to a factor with month abbreviations
+nypddata$Month <- factor(nypddata$Month, levels = sprintf("%02d", 1:12), labels = month.abb)
+
+# Ensure Day of Week spelling and completeness
+nypddata$DayOfWeek <- factor(nypddata$DayOfWeek, levels = c("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"))
+
+# Monthly Counts Calculation
+monthly_counts <- nypddata %>%
+  group_by(Month) %>%
+  summarise(Incidents = n())
+
+# Day of Week Counts Calculation
+day_of_week_counts <- nypddata %>%
+  group_by(DayOfWeek) %>%
+  summarise(Incidents = n())
+
+# Hour conversion to integer
+nypddata$Hour <- as.integer(substr(nypddata$OCCUR_TIME, 1, 2))
+
+# Time of Day Counts Calculation
+time_of_day_counts <- nypddata %>%
+  group_by(Hour) %>%
+  summarise(Incidents = n())
+```
+
+## Summarizing the Data
+Generate a summary of the dataset to understand its structure, variable types, and to identify any missing data.
+
+```{r data_summary}
+summary(nypddata)
+```
+## Check for missing data
+
+```{r data_missing}
+sapply(nypddata, function(x) sum(is.na(x)))
+```
+
+#### Strategy for Handling Missing Data
+After transformation and tidyness, there are no missing value. This will not require a strategy moving forward.
+
+# Temporal Trend Analysis
+
+```{r temporal_analysis, echo=FALSE}
+# Yearly Trend Analysis
+nypddata$Year <- year(nypddata$OCCUR_DATE)
+yearly_counts <- nypddata %>%
+  group_by(Year) %>%
+  summarise(Incidents = n())
+
+ggplot(yearly_counts, aes(x = Year, y = Incidents)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  labs(title = "NYPD Shooting Incidents Yearly Trend",
+       x = "Year",
+       y = "Number of Incidents")
+
+ggplot(monthly_counts, aes(x = Month, y = Incidents)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  theme_minimal() +
+  labs(title = "Monthly Trends in NYPD Shooting Incidents",
+       x = "Month",
+       y = "Number of Incidents")
+
+ggplot(day_of_week_counts, aes(x = DayOfWeek, y = Incidents)) +
+  geom_bar(stat = "identity", fill = "coral") +
+  theme_minimal() +
+  labs(title = "Day of the Week Trends in NYPD Shooting Incidents",
+       x = "Day of the Week",
+       y = "Number of Incidents")
+
+ggplot(time_of_day_counts, aes(x = Hour, y = Incidents)) +
+  geom_bar(stat = "identity", fill = "lightgreen") +
+  theme_minimal() +
+  scale_x_continuous(breaks = 0:23) +
+  labs(title = "Time of Day Analysis of NYPD Shooting Incidents",
+       x = "Hour of Day (24h)",
+       y = "Number of Incidents")
+```
+
+# Conclusion
+By analyzing the temporal trends, we can see that there is a sharp increase in shooting incidents from 2019 to 2020.This is could be due to the social change from the COVID pandemic or civil unrest. Many people had moved into quarantine, lost their jobs, and were uncertain about the future. Additional uncertainty and instability could be linked to the civil unrest and protests following the murder of George  Floyd. Further analysis would be required to determine what was the underlying external factor of the pandemic or civil unrest to uncover the connect. Possible avenues would be exploring how changes in employment (e.g. mass layoffs or recessions) affect crime rates. Additionally factors that introduce social uncertainty (terrorism, protests, or police corruption/brutality) would also need to be investigated to understand the impact of shooting incidents.
+
+We also see that shooting incidents tend to increase during the summer months, peaking in July and August. Further analysis shooting activity would be required to understand why warmer months are connected to more shootings. 
+
+Last we see that shootings are more common on the weekends and during the nighttime. This could indicate higher rates of violent activity outside of the typical workday. It would be interesting to uncover how the workday impacts criminal activity. 
+
+### Possible sources of bias
+  
+There could be bias in the data selection. This data was taken from 2006 to the 2023. All conclusions reported would only be able to speak on this time period and would not be sufficient to making predictions that require recent trends and recent changes to data collection methods.
+
+As mentioned this data is manually pulled every quarter. This system of data extraction presents a risk of human-error in reporting. 
+
+The decision to drop columns may have overlooked the possibility that the analysis requires more complex considerations. For example, location fields may have provided valuable insights that distinguish trends from the aggregate. 
